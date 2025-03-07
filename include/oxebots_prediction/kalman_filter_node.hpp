@@ -35,6 +35,9 @@ class KalmanFilterNode : public rclcpp::Node
     ~KalmanFilterNode();
 
    protected:
+    void ball_data_callback(oxebots_interfaces::msg::BallPosition);
+    void robots_data_callback(oxebots_interfaces::msg::RobotPosition);
+
     void initialize_ball_filter();
     void initialize_robots_filter();
 
