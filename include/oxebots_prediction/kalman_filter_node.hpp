@@ -18,13 +18,13 @@
 
 typedef struct RobotControlState
 {
-    Eigen::Vector4d state;
+    Eigen::VectorXd *state;
     uint32_t id;
 } RobotControlState;
 
 typedef struct RobotCovarianceState
 {
-    Eigen::Matrix4d covariance;
+    Eigen::MatrixXd * covariance;
     uint32_t id;
 } RobotCovarianceState;
 
@@ -61,13 +61,13 @@ class KalmanFilterNode : public rclcpp::Node
     // Vamos ter um vector de matrizes onde cada matriz pertence ao movimento
     // de um dos robos
 
-    std::vector<RobotControlState> _allies_state;
-    std::vector<RobotCovarianceState> _allies_covariance;
+    std::vector<RobotControlState> * _allies_state;
+    std::vector<RobotCovarianceState> * _allies_covariance;
 
-    std::vector<RobotControlState> _enemies_state;
-    std::vector<RobotCovarianceState> _enemies_covariance;
+    std::vector<RobotControlState> * _enemies_state;
+    std::vector<RobotCovarianceState> * _enemies_covariance;
 
     // Assim como ter uma matriz para o movimento da bola
-    Eigen::Vector4d _ball_state;
-    Eigen::Matrix4d _ball_covariance;
+    Eigen::VectorXd * _ball_state;
+    Eigen::MatrixXd * _ball_covariance;
 };
