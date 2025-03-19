@@ -1,5 +1,6 @@
 #include "oxebots_prediction/kalman_filter_node.hpp"
 
+#include "Eigen/src/Core/Matrix.h"
 #include "oxebots_interfaces/msg/ball_position.hpp"
 #include "oxebots_interfaces/msg/robot_position.hpp"
 
@@ -132,7 +133,15 @@ void KalmanFilterNode::initialize_ball_filter(
     RCLCPP_INFO(get_logger(), "Initializing the Ball filter...");
 }
 
-void KalmanFilterNode::initialize_robots_filter() {}
+void KalmanFilterNode::initialize_robots_filter(
+  oxebots_interfaces::msg::RobotPosition msg)
+{
+    RCLCPP_DEBUG(get_logger(), "Updateing robots filters");
+    for (int i = 0; i < get_parameter("team_size").as_int(); i++)
+    {
+      (_enemies_state[i]).state;
+    }
+}
 
 void KalmanFilterNode::update_ball_filter(
   oxebots_interfaces::msg::BallPosition msg)
@@ -157,7 +166,10 @@ void KalmanFilterNode::update_ball_filter(
       _ball_covariance;
 }
 
-void KalmanFilterNode::update_robots_filter() {}
+void KalmanFilterNode::update_robots_filter(
+  oxebots_interfaces::msg::RobotPosition msg)
+{
+}
 
 void KalmanFilterNode::prediction_ball_filter()
 {
@@ -222,8 +234,17 @@ void KalmanFilterNode::ball_data_callback(
 }
 
 void KalmanFilterNode::robots_data_callback(
-  oxebots_interfaces::msg::RobotPosition)
+  oxebots_interfaces::msg::RobotPosition msg)
 {
+    if (!_is_robots_initialized)
+    {
+        _is_robots_initialized = true;
+        initialize_robots_filter(msg);
+        return;
+    }
+
+    update_robots_filter(msg);
+    prediction_robots_filter();
 }
 
 int main(int argc, char * argv[])
