@@ -139,7 +139,7 @@ void KalmanFilterNode::initialize_robots_filter(
     RCLCPP_DEBUG(get_logger(), "Updateing robots filters");
     for (int i = 0; i < get_parameter("team_size").as_int(); i++)
     {
-      (_enemies_state[i]).state;
+      //(_enemies_state[i]).state;
     }
 }
 
@@ -162,7 +162,7 @@ void KalmanFilterNode::update_ball_filter(
     Eigen::VectorXd y = sensor_data - _measurement_matrix * _ball_state;
     _ball_state += kalman_gain * y;
     _ball_covariance =
-      (Eigen::MatrixXd::Identity(8, 8) * kalman_gain * _measurement_matrix) *
+      (Eigen::MatrixXd::Identity(8, 8) - kalman_gain * _measurement_matrix) *
       _ball_covariance;
 }
 
