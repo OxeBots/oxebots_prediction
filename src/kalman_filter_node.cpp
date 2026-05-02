@@ -26,22 +26,22 @@
 
 KalmanFilterNode::KalmanFilterNode() : rclcpp::Node("oxebots_kalman_filter")
 {
-    declare_parameter("ball_publisher", "ball_publisher");
-    declare_parameter("ball_subscriber", "ball_subscriber");
-    declare_parameter("robot_publisher", "robot_publisher");
-    declare_parameter("robot_subscriber", "robot_subscriber");
+    declare_parameter("ball_publisher", "ball_predicted");
+    declare_parameter("ball_subscriber", "ball_data");
+    declare_parameter("robot_publisher", "robot_predicted");
+    declare_parameter("robot_subscriber", "robot_data");
     declare_parameter("maximum_publisher_size", 10);
-    declare_parameter("team_size", 4);
+    declare_parameter("team_size", 3);
     declare_parameter("covariance_constant_multiplier", 1000);
     declare_parameter("sensor_measurement_noise", 1.0f);
     declare_parameter("process_noise", 0.8f);
 
-    _ball_publisher = create_publisher<oxebots_interfaces::msg::BallPredicted>(
+    _ball_publisher = create_publisher<oxebots_interfaces::msg::BallPrediction>(
       get_parameter("ball_publisher").as_string(),
       get_parameter("maximum_publisher_size").as_int());
 
     _robots_publisher =
-      create_publisher<oxebots_interfaces::msg::RobotPredicted>(
+      create_publisher<oxebots_interfaces::msg::RobotPrediction>(
         get_parameter("robot_publisher").as_string(),
         get_parameter("maximum_publisher_size").as_int());
 
@@ -59,37 +59,32 @@ KalmanFilterNode::KalmanFilterNode() : rclcpp::Node("oxebots_kalman_filter")
         std::bind(&KalmanFilterNode::ball_data_callback, this,
                   std::placeholders::_1));
 
-    _allies_state = new std::vector<RobotControlState>();
-    _enemies_state = new std::vector<RobotControlState>();
-    _allies_covariance = new std::vector<RobotCovarianceState>();
-    _enemies_covariance = new std::vector<RobotCovarianceState>();
-
     for (int i = 0; i < get_parameter("team_size").as_int(); i++)
     {
         RobotControlState ally_control;
-        ally_control.state = new Eigen::VectorXd(8);
+        ally_control.state = Eigen::VectorXd::Zero(8);
         ally_control.id = i;
-        _allies_state->push_back(ally_control);
+        ally_control.initialized = false;
+        _allies_state.push_back(ally_control);
 
         RobotControlState enemy_control;
-        enemy_control.state = new Eigen::VectorXd(8);
+        enemy_control.state = Eigen::VectorXd::Zero(8);
         enemy_control.id = i;
-        _enemies_state->push_back(enemy_control);
+        enemy_control.initialized = false;
+        _enemies_state.push_back(enemy_control);
 
         RobotCovarianceState ally_cov;
         ally_cov.id = i;
-        ally_cov.covariance = new Eigen::MatrixXd(
-          Eigen::MatrixXd::Identity(8, 8) *
-          get_parameter("covariance_constant_multiplier").as_double());
-        _allies_covariance->push_back(ally_cov);
+        ally_cov.covariance = Eigen::MatrixXd::Identity(8, 8) *
+          get_parameter("covariance_constant_multiplier").as_double();
+        _allies_covariance.push_back(ally_cov);
 
         RobotCovarianceState enemy_cov;
         enemy_cov.id = i;
-        enemy_cov.covariance = new Eigen::MatrixXd(
-          Eigen::MatrixXd::Identity(8, 8) *
-          get_parameter("covariance_constant_multiplier").as_double());
+        enemy_cov.covariance = Eigen::MatrixXd::Identity(8, 8) *
+          get_parameter("covariance_constant_multiplier").as_double();
 
-        _enemies_covariance->push_back(enemy_cov);
+        _enemies_covariance.push_back(enemy_cov);
     }
 
     _ball_state = Eigen::VectorXd(8);
@@ -97,8 +92,6 @@ KalmanFilterNode::KalmanFilterNode() : rclcpp::Node("oxebots_kalman_filter")
 
     _is_ball_initialized = false;
     _is_robots_initialized = false;
-    _initial_timestamp = std::chrono::system_clock::now().time_since_epoch() /
-                         std::chrono::milliseconds(1);
 
     _measurement_matrix = Eigen::MatrixXd(Eigen::MatrixXd::Zero(2, 8));
     _measurement_matrix(0, 0) = 1;
@@ -109,7 +102,7 @@ KalmanFilterNode::KalmanFilterNode() : rclcpp::Node("oxebots_kalman_filter")
       get_parameter("sensor_measurement_noise").as_double();
 
     _measurement_noise << sensor_measurment_squared, 0,
-      sensor_measurment_squared, 0;
+                          0, sensor_measurment_squared;
 
     _process_noise = Eigen::MatrixXd::Identity(8, 8) *
                      get_parameter("process_noise").as_double();
@@ -117,31 +110,21 @@ KalmanFilterNode::KalmanFilterNode() : rclcpp::Node("oxebots_kalman_filter")
 
 KalmanFilterNode::~KalmanFilterNode()
 {
-    delete _allies_covariance;
-    delete _allies_state;
-    delete _enemies_state;
-    delete _enemies_covariance;
 }
 
 void KalmanFilterNode::initialize_ball_filter(
   oxebots_interfaces::msg::BallPosition msg)
 {
     // Set the initial values
+    _ball_state.setZero();
     _ball_state(0) = msg.x;
     _ball_state(1) = msg.y;
     _ball_covariance = Eigen::MatrixXd::Identity(8, 8);
+    _last_ball_time = now();
     RCLCPP_INFO(get_logger(), "Initializing the Ball filter...");
 }
 
-void KalmanFilterNode::initialize_robots_filter(
-  oxebots_interfaces::msg::RobotPosition msg)
-{
-    RCLCPP_DEBUG(get_logger(), "Updateing robots filters");
-    for (int i = 0; i < get_parameter("team_size").as_int(); i++)
-    {
-      //(_enemies_state[i]).state;
-    }
-}
+
 
 void KalmanFilterNode::update_ball_filter(
   oxebots_interfaces::msg::BallPosition msg)
@@ -169,55 +152,162 @@ void KalmanFilterNode::update_ball_filter(
 void KalmanFilterNode::update_robots_filter(
   oxebots_interfaces::msg::RobotPosition msg)
 {
+    auto update_list = [&](const std::vector<oxebots_interfaces::msg::RobotGameData>& robots, 
+                           std::vector<RobotControlState>& states, 
+                           std::vector<RobotCovarianceState>& covariances) {
+        for (const auto& robot : robots) {
+            if (robot.id >= states.size()) continue;
+
+            auto& state_obj = states[robot.id];
+            auto& cov_obj = covariances[robot.id];
+
+            if (!state_obj.initialized) {
+                state_obj.state.setZero();
+                state_obj.state(0) = robot.x;
+                state_obj.state(1) = robot.y;
+                state_obj.state(6) = robot.orientation;
+                state_obj.initialized = true;
+                continue;
+            }
+
+            // Measurement: x, y, orientation
+            Eigen::VectorXd z(3);
+            z << robot.x, robot.y, robot.orientation;
+
+            // Handle orientation wrap-around
+            double diff_theta = z(2) - state_obj.state(6);
+            while (diff_theta > M_PI) diff_theta -= 2 * M_PI;
+            while (diff_theta < -M_PI) diff_theta += 2 * M_PI;
+            z(2) = state_obj.state(6) + diff_theta;
+
+            Eigen::MatrixXd H = Eigen::MatrixXd::Zero(3, 8);
+            H(0, 0) = 1; H(1, 1) = 1; H(2, 6) = 1;
+
+            Eigen::Matrix3d R = Eigen::Matrix3d::Identity() * get_parameter("sensor_measurement_noise").as_double();
+            
+            Eigen::MatrixXd S = H * cov_obj.covariance * H.transpose() + R;
+            Eigen::MatrixXd K = cov_obj.covariance * H.transpose() * S.inverse();
+
+            state_obj.state += K * (z - H * state_obj.state);
+            cov_obj.covariance = (Eigen::MatrixXd::Identity(8, 8) - K * H) * cov_obj.covariance;
+            
+            // Normalize orientation after update
+            while (state_obj.state(6) > M_PI) state_obj.state(6) -= 2 * M_PI;
+            while (state_obj.state(6) < -M_PI) state_obj.state(6) += 2 * M_PI;
+        }
+    };
+
+    update_list(msg.allies, _allies_state, _allies_covariance);
+    update_list(msg.enemies, _enemies_state, _enemies_covariance);
 }
 
 void KalmanFilterNode::prediction_ball_filter()
 {
-    int dt = (std::chrono::system_clock::now().time_since_epoch() /
-              std::chrono::milliseconds(1)) -
-             _initial_timestamp;
+    rclcpp::Time current_time = now();
+    double dt = (current_time - _last_ball_time).seconds();
+    _last_ball_time = current_time;
 
-    RCLCPP_DEBUG(get_logger(), "Ball prediction");
+    if (dt <= 0) return;
 
-    // Calculate the f function
-    // The velocity is a function by: a_t = a_(t-1) * x + b, and position and
-    // velocity are the derivatives. In order by:
-    // p_x > p_y > v_x > v_y > a_x > a_y > alpha_x > alpha_y
-    Eigen::VectorXd predicted_ball_state = Eigen::VectorXd(8);
-    predicted_ball_state << _ball_state(0) + _ball_state(2) * dt +
-                              0.5 * _ball_state(4) * dt * dt +
-                              (1 / 6.0) * _ball_state(6) * dt * dt * dt,
-      _ball_state(1) + _ball_state(3) * dt + 0.5 * _ball_state(5) * dt * dt +
-        (1 / 6.0) * _ball_state(7) * dt * dt * dt,
-      _ball_state(2) + _ball_state(4) * dt + 0.5 * _ball_state(6) * dt * dt,
-      _ball_state(3) + _ball_state(5) * dt + 0.5 * _ball_state(7) * dt * dt,
-      _ball_state(4) + _ball_state(6) * dt,
-      _ball_state(5) + _ball_state(7) * dt, _ball_state(6), _ball_state(7);
+    RCLCPP_DEBUG(get_logger(), "Ball prediction with dt: %f", dt);
 
-    Eigen::MatrixXd jacobian(8, 8);
-    // [1, 0, dt, 0, 0.5 * dt**2, 0, (1/6) * dt**3, 0],
-    // [0, 1, 0, dt, 0, 0.5 * dt**2, 0, (1/6) * dt**3],
-    // [0, 0, 1, 0, dt, 0, 0.5 * dt**2, 0],
-    // [0, 0, 0, 1, 0, dt, 0, 0.5 * dt**2],
-    // [0, 0, 0, 0, 1, 0, dt, 0],
-    // [0, 0, 0, 0, 0, 1, 0, dt],
-    // [0, 0, 0, 0, 0, 0, 1, 0],
-    // [0, 0, 0, 0, 0, 0, 0, 1]
-    jacobian << 1, 0, dt, 0, 0.5f * dt * dt, 0, (1 / 6.0f) * dt * dt * dt, 0,
-      0, 1, 0, dt, 0, 0.5f * dt * dt, 0, (1 / 6.0f) * dt * dt * dt, 0, 0, 1, 0,
-      dt, 0, 0.5f * dt * dt, 0, 0, 0, 0, 1, 0, dt, 0, 0.5f * dt * dt, 0, 0, 0,
-      0, 1, 0, dt, 0, 0, 0, 0, 0, 0, 1, 0, dt, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
-      0, 0, 0, 0, 1;
+    // Update state using the motion model (p_k = p_k-1 + v*dt + 0.5*a*dt^2 + ...)
+    Eigen::VectorXd next_state(8);
+    double dt2 = dt * dt;
+    double dt3 = dt2 * dt;
 
-    Eigen::MatrixXd predicted_ball_covariance =
-      jacobian * _ball_covariance * jacobian.transpose() + _process_noise;
+    next_state(0) = _ball_state(0) + _ball_state(2) * dt + 0.5 * _ball_state(4) * dt2 + (1.0 / 6.0) * _ball_state(6) * dt3;
+    next_state(1) = _ball_state(1) + _ball_state(3) * dt + 0.5 * _ball_state(5) * dt2 + (1.0 / 6.0) * _ball_state(7) * dt3;
+    next_state(2) = _ball_state(2) + _ball_state(4) * dt + 0.5 * _ball_state(6) * dt2;
+    next_state(3) = _ball_state(3) + _ball_state(5) * dt + 0.5 * _ball_state(7) * dt2;
+    next_state(4) = _ball_state(4) + _ball_state(6) * dt;
+    next_state(5) = _ball_state(5) + _ball_state(7) * dt;
+    next_state(6) = _ball_state(6);
+    next_state(7) = _ball_state(7);
 
-    // TODO: Send the prediction to the channel
-    // RCLCPP_DEBUG(get_logger(), "Publishing ball prediction");
-    // _ball_publisher->publish()
+    _ball_state = next_state;
+
+    // Jacobian matrix for the motion model
+    Eigen::MatrixXd jacobian = Eigen::MatrixXd::Identity(8, 8);
+    jacobian(0, 2) = dt; jacobian(0, 4) = 0.5 * dt2; jacobian(0, 6) = (1.0 / 6.0) * dt3;
+    jacobian(1, 3) = dt; jacobian(1, 5) = 0.5 * dt2; jacobian(1, 7) = (1.0 / 6.0) * dt3;
+    jacobian(2, 4) = dt; jacobian(2, 6) = 0.5 * dt2;
+    jacobian(3, 5) = dt; jacobian(3, 7) = 0.5 * dt2;
+    jacobian(4, 6) = dt;
+    jacobian(5, 7) = dt;
+
+    _ball_covariance = jacobian * _ball_covariance * jacobian.transpose() + _process_noise;
+
+    // Publish prediction
+    oxebots_interfaces::msg::BallPrediction prediction_msg;
+    prediction_msg.x = _ball_state(0);
+    prediction_msg.y = _ball_state(1);
+    prediction_msg.vx = _ball_state(2);
+    prediction_msg.vy = _ball_state(3);
+    prediction_msg.ax = _ball_state(4);
+    prediction_msg.ay = _ball_state(5);
+    _ball_publisher->publish(prediction_msg);
 }
 
-void KalmanFilterNode::prediction_robots_filter() {}
+void KalmanFilterNode::prediction_robots_filter()
+{
+    rclcpp::Time current_time = now();
+    double dt = (current_time - _last_robots_time).seconds();
+    _last_robots_time = current_time;
+
+    if (dt <= 0) return;
+
+    auto predict_list = [&](std::vector<RobotControlState>& states, 
+                            std::vector<RobotCovarianceState>& covariances) -> std::vector<oxebots_interfaces::msg::RobotPredictionData> {
+        std::vector<oxebots_interfaces::msg::RobotPredictionData> predicted_robots;
+        
+        double dt2 = dt * dt;
+        
+        // Jacobian for motion model
+        Eigen::MatrixXd F = Eigen::MatrixXd::Identity(8, 8);
+        F(0, 2) = dt; F(0, 4) = 0.5 * dt2;
+        F(1, 3) = dt; F(1, 5) = 0.5 * dt2;
+        F(2, 4) = dt;
+        F(3, 5) = dt;
+        F(6, 7) = dt;
+
+        for (size_t i = 0; i < states.size(); ++i) {
+            if (!states[i].initialized) continue;
+
+            auto& state = states[i].state;
+            auto& cov = covariances[i].covariance;
+
+            // State prediction
+            state = F * state;
+
+            // Normalize orientation
+            while (state(6) > M_PI) state(6) -= 2 * M_PI;
+            while (state(6) < -M_PI) state(6) += 2 * M_PI;
+
+            // Covariance prediction
+            cov = F * cov * F.transpose() + _process_noise;
+
+            // Prepare message
+            oxebots_interfaces::msg::RobotPredictionData data;
+            data.id = states[i].id;
+            data.x = state(0);
+            data.y = state(1);
+            data.vx = state(2);
+            data.vy = state(3);
+            data.ax = state(4);
+            data.ay = state(5);
+            data.orientation = state(6);
+            data.vorientation = state(7);
+            predicted_robots.push_back(data);
+        }
+        return predicted_robots;
+    };
+
+    oxebots_interfaces::msg::RobotPrediction predicted_msg;
+    predicted_msg.allies = predict_list(_allies_state, _allies_covariance);
+    predicted_msg.enemies = predict_list(_enemies_state, _enemies_covariance);
+    _robots_publisher->publish(predicted_msg);
+}
 
 void KalmanFilterNode::ball_data_callback(
   oxebots_interfaces::msg::BallPosition msg)
@@ -229,8 +319,8 @@ void KalmanFilterNode::ball_data_callback(
         return;
     }
 
-    update_ball_filter(msg);
     prediction_ball_filter();
+    update_ball_filter(msg);
 }
 
 void KalmanFilterNode::robots_data_callback(
@@ -239,8 +329,8 @@ void KalmanFilterNode::robots_data_callback(
     if (!_is_robots_initialized)
     {
         _is_robots_initialized = true;
-        initialize_robots_filter(msg);
-        return;
+        _last_robots_time = now();
+        RCLCPP_INFO(get_logger(), "Initializing the Robots filter...");
     }
 
     update_robots_filter(msg);

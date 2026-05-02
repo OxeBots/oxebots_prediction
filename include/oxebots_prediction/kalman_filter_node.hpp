@@ -14,19 +14,20 @@
 #include "Eigen/src/Core/Matrix.h"
 #include "Eigen/src/Core/util/Macros.h"
 #include "oxebots_interfaces/msg/ball_position.hpp"
-#include "oxebots_interfaces/msg/ball_predicted.hpp"
+#include "oxebots_interfaces/msg/ball_prediction.hpp"
 #include "oxebots_interfaces/msg/robot_position.hpp"
-#include "oxebots_interfaces/msg/robot_predicted.hpp"
+#include "oxebots_interfaces/msg/robot_prediction.hpp"
 
 typedef struct RobotControlState
 {
-    Eigen::VectorXd * state;
+    Eigen::VectorXd state;
     uint32_t id;
+    bool initialized;
 } RobotControlState;
 
 typedef struct RobotCovarianceState
 {
-    Eigen::MatrixXd * covariance;
+    Eigen::MatrixXd covariance;
     uint32_t id;
 } RobotCovarianceState;
 
@@ -41,8 +42,7 @@ class KalmanFilterNode : public rclcpp::Node
     void robots_data_callback(oxebots_interfaces::msg::RobotPosition msg);
 
     void initialize_ball_filter(oxebots_interfaces::msg::BallPosition msg);
-    void initialize_robots_filter(oxebots_interfaces::msg::RobotPosition msg);
-
+    
     void update_ball_filter(oxebots_interfaces::msg::BallPosition msg);
     void update_robots_filter(oxebots_interfaces::msg::RobotPosition msg);
 
@@ -55,19 +55,16 @@ class KalmanFilterNode : public rclcpp::Node
     rclcpp::Subscription<oxebots_interfaces::msg::BallPosition>::SharedPtr
       _ball_subscriber;
 
-    rclcpp::Publisher<oxebots_interfaces::msg::BallPredicted>::SharedPtr
+    rclcpp::Publisher<oxebots_interfaces::msg::BallPrediction>::SharedPtr
       _ball_publisher;
-    rclcpp::Publisher<oxebots_interfaces::msg::RobotPredicted>::SharedPtr
+    rclcpp::Publisher<oxebots_interfaces::msg::RobotPrediction>::SharedPtr
       _robots_publisher;
 
-    // Vamos ter um vector de matrizes onde cada matriz pertence ao movimento
-    // de um dos robos
+    std::vector<RobotControlState> _allies_state;
+    std::vector<RobotCovarianceState> _allies_covariance;
 
-    std::vector<RobotControlState> * _allies_state;
-    std::vector<RobotCovarianceState> * _allies_covariance;
-
-    std::vector<RobotControlState> * _enemies_state;
-    std::vector<RobotCovarianceState> * _enemies_covariance;
+    std::vector<RobotControlState> _enemies_state;
+    std::vector<RobotCovarianceState> _enemies_covariance;
 
     // Assim como ter uma matriz para o movimento da bola
     Eigen::VectorXd _ball_state;
@@ -75,7 +72,9 @@ class KalmanFilterNode : public rclcpp::Node
 
     bool _is_ball_initialized;
     bool _is_robots_initialized;
-    unsigned long _initial_timestamp;
+    
+    rclcpp::Time _last_ball_time;
+    rclcpp::Time _last_robots_time;
 
     Eigen::MatrixXd _measurement_matrix;
     Eigen::Matrix2d _measurement_noise;
