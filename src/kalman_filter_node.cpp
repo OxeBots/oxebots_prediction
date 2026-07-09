@@ -32,7 +32,7 @@ KalmanFilterNode::KalmanFilterNode() : rclcpp::Node("oxebots_kalman_filter")
     declare_parameter("robot_subscriber", "robot_data");
     declare_parameter("maximum_publisher_size", 10);
     declare_parameter("team_size", 3);
-    declare_parameter("covariance_constant_multiplier", 1000);
+    declare_parameter("covariance_constant_multiplier", 1000.0);
     declare_parameter("sensor_measurement_noise", 1.0f);
     declare_parameter("process_noise", 0.8f);
 
