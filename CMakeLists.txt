@@ -23,9 +23,12 @@ include_directories(
 add_executable(
   kalman_filter_node
   src/kalman_filter_node.cpp
+  src/ball_kalman_filter.cpp
+  src/robot_kalman_filter.cpp
 )
 
 ament_target_dependencies(kalman_filter_node rclcpp oxebots_interfaces)
+target_link_libraries(kalman_filter_node Eigen3::Eigen)
 
 install(TARGETS
     kalman_filter_node
