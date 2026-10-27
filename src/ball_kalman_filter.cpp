@@ -102,19 +102,31 @@ void BallKalmanFilter::update(double meas_x, double meas_y, double dt)
     Eigen::Vector2d z(meas_x, meas_y);
     Eigen::Vector2d y = z - state_.head<2>();
 
-    // Detecção de chute / impacto:
-    // Se a inovação espacial for muito superior ao ruído do sensor, a bola sofreu
-    // um impulso mecânico. Infla a covariância da velocidade para convergir sem atraso.
+    // Detecção de teleporte no simulador (grSim) vs chute / impacto real:
+    // Se a bola saltou mais de 400mm em um único frame (~16ms -> >25 m/s), ela foi reposicionada
+    // manualmente no grSim. Reinicializa o filtro na nova posição com velocidade zero para não
+    // gerar velocidades absurdas que ficam oscilando de um lado para o outro por ~1-2 segundos.
     double innov_dist = y.norm();
+    constexpr double kTeleportThresholdMm = 400.0;
+    if (innov_dist > kTeleportThresholdMm) {
+        init(meas_x, meas_y);
+        return;
+    }
+
     if (innov_dist > config_.kick_threshold_mm) {
         constexpr double kKickCovarianceInflation = 9000000.0; // (3000 mm/s)^2
         covariance_(2, 2) += kKickCovarianceInflation;
         covariance_(3, 3) += kKickCovarianceInflation;
 
         if (dt > 1e-4) {
-            // Ajuste instantâneo de velocidade estimada no sentido do salto da medição
-            state_(2) = 0.5 * state_(2) + 0.5 * (y(0) / dt);
-            state_(3) = 0.5 * state_(3) + 0.5 * (y(1) / dt);
+            // Ajuste instantâneo da posição e velocidade sem aplicar o salto duas vezes via K*y
+            constexpr double kMaxBallSpeedMmS = 8000.0;
+            double vx_est = std::clamp(y(0) / dt, -kMaxBallSpeedMmS, kMaxBallSpeedMmS);
+            double vy_est = std::clamp(y(1) / dt, -kMaxBallSpeedMmS, kMaxBallSpeedMmS);
+            state_(0) = meas_x;
+            state_(1) = meas_y;
+            state_(2) = 0.5 * state_(2) + 0.5 * vx_est;
+            state_(3) = 0.5 * state_(3) + 0.5 * vy_est;
             y = z - state_.head<2>();
         }
     }
