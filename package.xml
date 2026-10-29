@@ -3,11 +3,12 @@
 <package format="3">
   <name>oxebots_prediction</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Kalman Filter state estimation for ball (4D with carpet friction) and robots (6D) for the OxeBots SSL team</description>
   <maintainer email="ce.cesc01@gmail.com">carlos</maintainer>
-  <license>TODO: License declaration</license>
+  <license>GPLv3</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>eigen3_cmake_module</buildtool_depend>
 
   <depend>rclcpp</depend>
   <depend>oxebots_interfaces</depend>
