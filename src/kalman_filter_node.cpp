@@ -114,23 +114,43 @@ void KalmanFilterNode::robots_data_callback(const oxebots_interfaces::msg::Robot
     }
 
     auto process_robots = [&](const std::vector<oxebots_interfaces::msg::RobotGameData> & robots,
-                              std::map<uint32_t, oxebots_prediction::RobotKalmanFilter> & filters)
+                              std::map<uint32_t, oxebots_prediction::RobotKalmanFilter> & filters,
+                              std::map<uint32_t, rclcpp::Time> & last_stamps)
         -> std::vector<oxebots_interfaces::msg::RobotPredictionData>
     {
         std::vector<oxebots_interfaces::msg::RobotPredictionData> result;
         result.reserve(robots.size());
 
         for (const auto & robot : robots) {
+            const bool has_stamp = (robot.stamp.sec != 0 || robot.stamp.nanosec != 0);
+            const rclcpp::Time r_stamp = has_stamp
+                ? rclcpp::Time(robot.stamp.sec, robot.stamp.nanosec, current_time.get_clock_type())
+                : current_time;
+
             auto it = filters.find(robot.id);
             if (it == filters.end()) {
                 oxebots_prediction::RobotKalmanFilter filter(_robot_config);
                 filter.init(robot.x, robot.y, robot.orientation);
                 filters[robot.id] = filter;
+                last_stamps[robot.id] = r_stamp;
+            } else if (has_stamp && last_stamps.count(robot.id)) {
+                double r_dt = (r_stamp - last_stamps[robot.id]).seconds();
+                if (r_dt > 1.0) {
+                    it->second.init(robot.x, robot.y, robot.orientation);
+                    last_stamps[robot.id] = r_stamp;
+                } else if (r_dt > 1e-6) {
+                    it->second.predict(r_dt);
+                    it->second.update(robot.x, robot.y, robot.orientation);
+                    last_stamps[robot.id] = r_stamp;
+                }
+                // Se r_dt <= 1e-6, o robô não teve leitura nova nesta câmera: não alimenta
+                // medição duplicada (que derrubaria a velocidade estimada para zero).
             } else {
                 if (dt > 0.0) {
                     it->second.predict(dt);
                 }
                 it->second.update(robot.x, robot.y, robot.orientation);
+                last_stamps[robot.id] = r_stamp;
             }
 
             const auto & f = filters[robot.id];
@@ -150,8 +170,8 @@ void KalmanFilterNode::robots_data_callback(const oxebots_interfaces::msg::Robot
     };
 
     oxebots_interfaces::msg::RobotPrediction predicted_msg;
-    predicted_msg.allies = process_robots(msg->allies, _allies_filters);
-    predicted_msg.enemies = process_robots(msg->enemies, _enemies_filters);
+    predicted_msg.allies = process_robots(msg->allies, _allies_filters, _allies_last_stamp);
+    predicted_msg.enemies = process_robots(msg->enemies, _enemies_filters, _enemies_last_stamp);
 
     _robots_publisher->publish(predicted_msg);
 }

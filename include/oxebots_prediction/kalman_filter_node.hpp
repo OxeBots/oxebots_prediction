@@ -38,6 +38,8 @@ private:
     oxebots_prediction::BallKalmanFilter _ball_filter;
     std::map<uint32_t, oxebots_prediction::RobotKalmanFilter> _allies_filters;
     std::map<uint32_t, oxebots_prediction::RobotKalmanFilter> _enemies_filters;
+    std::map<uint32_t, rclcpp::Time> _allies_last_stamp;
+    std::map<uint32_t, rclcpp::Time> _enemies_last_stamp;
 
     bool _is_ball_initialized{false};
     bool _is_robots_initialized{false};
