@@ -41,6 +41,18 @@ install(
 )
 
 if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_kalman_filter
+    test/test_kalman_filter.cpp
+    src/ball_kalman_filter.cpp
+    src/robot_kalman_filter.cpp
+  )
+  ament_target_dependencies(test_kalman_filter
+    rclcpp
+    oxebots_interfaces
+  )
+  target_link_libraries(test_kalman_filter Eigen3::Eigen)
+
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
   # comment the line when a copyright and license is added to all source files
