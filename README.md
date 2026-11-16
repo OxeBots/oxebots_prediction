@@ -26,11 +26,11 @@ Este pacote implementa o nó `kalman_filter_node`, responsável por filtrar o ru
 
 ### 2.1 Assinaturas (Subscribers)
 - `ball_data` (`oxebots_interfaces/msg/BallPosition`): Posição 2D medida da bola vinda do `game_observer_node`.
-- `robot_data` (`oxebots_interfaces/msg/RobotGameData`): Dados de pose medidos dos robôs vindos do `game_observer_node`.
+- `robot_data` (`oxebots_interfaces/msg/RobotPosition`): Dados de pose medidos dos robôs aliados e adversários (`RobotGameData[]`) vindos do `game_observer_node`.
 
 ### 2.2 Publicações (Publishers)
-- `ball_predicted` (`oxebots_interfaces/msg/BallPredicted`): Posição e vetor de velocidade filtrados da bola.
-- `robot_predicted` (`oxebots_interfaces/msg/RobotPredicted`): Posição, orientação e velocidades filtradas dos robôs.
+- `ball_predicted` (`oxebots_interfaces/msg/BallPrediction`): Posição, velocidade e aceleração filtradas da bola.
+- `robot_predicted` (`oxebots_interfaces/msg/RobotPrediction`): Posição, orientação e velocidades filtradas dos robôs (`RobotPredictionData[]`).
 
 ---
 
